@@ -38,8 +38,8 @@ android {
         // ★ 发新版时把这两个数字一起往上加 ★
         // versionCode 必须是整数且单调递增（升级判断只看它）；
         // versionName 只是给人看的。
-        versionCode 22
-        versionName "2.9.4"
+        versionCode 23
+        versionName "2.9.5"
 
         // ★ v2.9.4：只发 arm64 ★
         // 之前 APK 里同时打了两套 ML Kit 原生库：
