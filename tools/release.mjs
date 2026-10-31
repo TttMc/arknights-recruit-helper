@@ -239,6 +239,21 @@ async function pushViaApi(dry) {
     return headSha;
   }
 
+  // ★ 幂等保护 ★
+  //
+  // Git Data API 只能整树重放，没法「只推变化的文件」。所以每次调用都会新建一个
+  // commit —— 如果远端内容其实和本地一样（比如上一次已经推过、这次只是重传
+  // Release 资产），就会白造一个内容相同的重复提交。
+  //
+  // 这里先比对远端 HEAD 的 tree 与本地 HEAD 的 tree：一致就说明内容相同、只是
+  // commit sha 不同（SHA 里含 author/时间戳），直接跳过。
+  const localTree = git('rev-parse', 'HEAD^{tree}').toString().trim();
+  const remoteCommit = await gh('GET', `/repos/${REPO}/git/commits/${parentSha}`);
+  if (remoteCommit.status === 200 && remoteCommit.json.tree?.sha === localTree) {
+    info('远端内容与本地一致（tree 相同），跳过推送');
+    return parentSha;
+  }
+
   // 逐个上传 blob
   const tree = [];
   for (let i = 0; i < files.length; i++) {
