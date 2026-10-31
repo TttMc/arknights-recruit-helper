@@ -13,6 +13,8 @@ import com.google.mlkit.vision.text.TextRecognizer;
 import com.google.mlkit.vision.text.chinese.ChineseTextRecognizerOptions;
 
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
@@ -135,16 +137,40 @@ public final class TagFinder {
             List<Rect> group = pickTagGroup(boxes);
             // 标签区正常就是 5 个按钮（3+2）。数量对不上说明几何假设可能失效。
             if (group.size() != 5) r.uncertain = true;
+
+            // ★ v2.9.6 修复（真机反馈：多个 4 字标签时误报「识别不准确」）★
+            //
+            // 根因有两层，都在「每按钮独立归一化 + 结果去重」这个做法上：
+            //
+            //  ① 去重吞标签。公招 5 个标签**必然互不相同**，所以去重本身没错；
+            //     但 bug 在于：某按钮的残片（如「辅助」）被 normalize 成完整标签
+            //     （「辅助干员」）后，会和另一个真按钮的识别结果撞车。此时
+            //     `!tags.contains(tag)` 把后到的那个丢掉 → 只剩 4 个 → uncertain。
+            //     真实场景：5 个里有 4 个是 4 字标签时，这种撞车概率显著上升。
+            //
+            //  ② 静默错认。4 字标签只认出前 2 字时，normalize 的「唯一命中」
+            //     规则会把它放大成某个 4 字标签，但可能放错：
+            //       「医疗」→ 治疗（丢了干员）、「快速」→ 减速
+            //     这类错误不触发 uncertain，用户看到的是一个**错的但自信**的结论。
+            //
+            // 修法：改成「先收集所有候选，再做全局最优分配」——
+            //   · 每个按钮收集多个候选（不够就用 VALID 里所有合理候选，
+            //     按与原始文本的相似度排序）；
+            //   · 然后贪心分配：**同一个标签只能用一次**（互不相同约束）；
+            //   · 每个按钮取「自己还没被用掉的最佳候选」。
+            // 这样撞车不再丢信息，而是让第二个按钮退而求其次选它的次优候选。
+            List<List<String>> cands = new ArrayList<>();
             for (Rect b : group) {
                 if (android.os.SystemClock.elapsedRealtime() >= deadline) {
                     r.uncertain = true;
                     break;
                 }
                 Rect safe = safeCropRect(b, boxes);
-                String tag = readButtonTag(src, safe, rec, deadline);
-                if (tag != null && !r.tags.contains(tag)) r.tags.add(tag);
-                if (r.tags.size() >= 5) break;
+                List<String> c = readButtonCandidates(src, safe, rec, deadline);
+                cands.add(c);
             }
+            assignTags(cands, r.tags);
+
             // 读到 4 个、只差一个，通常是最后一个按钮 OCR 失败，
             // 此时结论仍可用，但要让用户知道少了一个标签。
             if (r.tags.size() != 5 && group.size() == 5) r.uncertain = true;
@@ -453,52 +479,194 @@ public final class TagFinder {
     }
 
     /**
-     * 读单个标签按钮，多重试。
+     * 读单个按钮，返回**候选列表**（按置信度从高到低），而不是只返回一个值。
      *
-     * ★ 位移漏识别的原因（2026-10-30）★
-     * 旧版每个按钮只试一次 2x 缩放，识别不出就跳过。
-     * 但 ML Kit 对「深底白字的 2 字词」很不稳定：
-     * 「位移」在 2x 下经常认成「佗移」「位秽」，直接返回 null 后
-     * 这个标签就永远丢了 —— 用户看到的就是「位移没被识别出来」。
+     * ★ v2.9.6 新增 ★
      *
-     * 现在对每个按钮做多档重试：2x → 3x → 1.5x，
-     * 任一档能过 normalize（含编辑距离容错）就采纳。
+     * 原来 readButtonTag 命中第一档就返回单值，导致两个问题：
+     *   · 两个按钮归一化撞成同一个标签时，后一个被去重丢掉（信息全丢）；
+     *   · 只认出前 2 字时，若「唯一命中」规则放错（快速复活→减速），无从纠正。
+     *
+     * 现在：
+     *   · 每档 OCR 只要产出文本，就把 normalize 的结果按顺序记进候选；
+     *   · 如果所有档都失败或候选太少，再加一批「跟原始文本相似的历史候选」
+     *     （用于 resolveCandidates 的兜底），让全局分配有得选。
      */
-    private static String readButtonTag(Bitmap src, Rect box, TextRecognizer rec,
-                                        long deadline) {
-        // 三重增强策略，命中即返回：
-        //  1. 原图 ×2 / ×3 / ×1.5  —— 基础放大
-        //  2. 反色 + 增强对比 ×2    —— 深底白字转白底黑字，ML Kit 明显更准
-        //  3. 原图 ×4              —— 上面都失败时的大倍率兜底
-        //
-        // ★ v2.9：每一档开跑前都检查总预算，超了就放弃剩余档位 ★
-        // 否则 5 按钮 × 6 档 × 6 秒 ≈ 180 秒的极端情况依然存在。
-        float[] plain = {2f, 3f, 1.5f};
+    private static List<String> readButtonCandidates(Bitmap src, Rect box, TextRecognizer rec,
+                                                     long deadline) {
+        List<String> out = new ArrayList<>();
+        String firstRaw = null;
+
+        // 4 字标签在 2x 下容易截断，所以 3x / 4x 也放进主循环，
+        // 且**只有精确命中才允许提前收工**（见下方 exact 判断）。
+        float[] plain = {2f, 3f, 1.5f, 4f};
         for (float s : plain) {
             long left = deadline - android.os.SystemClock.elapsedRealtime();
-            if (left < 600) return null;
-            String tag = tryRead(src, box, rec, s, false, Math.min(SLOT_TIMEOUT_MS, left));
-            if (tag != null) return tag;
+            if (left < 600) return out;
+            String raw = ocr(src, box, rec, s, Math.min(SLOT_TIMEOUT_MS, left), false);
+            if (raw == null) continue;
+            if (firstRaw == null) firstRaw = raw;
+
+            boolean exact = isExactTag(raw);
+            String tag = normalize(raw);
+            if (tag != null) {
+                if (exact) {
+                    // ★ 精确命中的候选必须排到最前 ★
+                    // 「医疗」会被纠错成「治疗」，而 3x 才给出真正的「医疗干员」。
+                    // 沿用"先到先得"的顺序，正确的那个就永远排在后面、分配时取不到。
+                    out.remove(tag);
+                    out.add(0, tag);
+                } else if (!out.contains(tag)) {
+                    out.add(tag);
+                }
+            }
+
+            // 只有「真读到了完整标签」才值得停止重试；
+            // 靠纠错规则猜出来的（4 字被截成前缀）应继续试更大倍率。
+            if (exact) return out;
         }
-        // 反色增强：这是解决「位移→佗移」这类问题的关键
+        if (!out.isEmpty()) return out;
+
+        // 第二轮：反色增强（深底白字转白底黑字，对长标签更稳）
         float[] boost = {2f, 3f};
         for (float s : boost) {
             long left = deadline - android.os.SystemClock.elapsedRealtime();
-            if (left < 600) return null;
-            String tag = tryRead(src, box, rec, s, true, Math.min(SLOT_TIMEOUT_MS, left));
-            if (tag != null) return tag;
+            if (left < 600) return out;
+            String raw = ocr(src, box, rec, s, Math.min(SLOT_TIMEOUT_MS, left), true);
+            if (raw == null) continue;
+            if (firstRaw == null) firstRaw = raw;
+            String tag = normalize(raw);
+            if (tag != null) {
+                if (isExactTag(raw)) {
+                    out.remove(tag);
+                    out.add(0, tag);
+                    return out;
+                }
+                if (!out.contains(tag)) out.add(tag);
+            }
         }
-        long left = deadline - android.os.SystemClock.elapsedRealtime();
-        if (left < 600) return null;
-        return tryRead(src, box, rec, 4f, false, Math.min(SLOT_TIMEOUT_MS, left));
+        if (!out.isEmpty()) return out;
+
+        // 第三轮：还是没候选，但有原始文本（比如「医疗」「快速」这种被 normalize
+        // 判为不唯一的残片）→ 列出所有「它明显是哪个标签」，交给全局分配裁决。
+        //
+        // 注：原「4x 兜底」那一轮已经并入主循环的 plain 数组，不再重复跑。
+        if (firstRaw != null) {
+            out.addAll(plausibleTags(firstRaw));
+        }
+        return out;
     }
 
-    /** 读一次：scale 放大，(optional) 反色+对比度增强 */
-    private static String tryRead(Bitmap src, Rect box, TextRecognizer rec,
-                                  float scale, boolean enhance, long timeoutMs) {
-        String text = ocr(src, box, rec, scale, timeoutMs, enhance);
-        if (text == null) return null;
-        return normalize(text);
+    /**
+     * 原始 OCR 文本（清理空白与括号后）是否**恰好等于**某个合法标签。
+     *
+     * 用来区分「真读到了完整标签」和「靠纠错规则猜出来的」：
+     * 前者可以直接采信并停止重试，后者应该继续尝试更大倍率（4 字标签尤其如此）。
+     */
+    private static boolean isExactTag(String raw) {
+        if (raw == null) return false;
+        String t = raw.replaceAll("[\\s\\u00A0]", "")
+                .replace("（", "").replace("）", "")
+                .replace("(", "").replace(")", "");
+        if (t.isEmpty()) return false;
+        for (String v : VALID) if (v.equals(t)) return true;
+        return false;
+    }
+
+    /**
+     * 给一段 OCR 原始文本，列出所有「它可能是哪个合法标签」的候选，
+     * 按相似度从高到低排序。
+     *
+     * ★ 严格限定候选范围 ★
+     *
+     * 第一版把「有序子序列」「编辑距离 ≤2」都算作可能，结果残片「辅助」能
+     * 匹配出一大堆无关标签（位移、生存……），全局分配取次优时就编出了假标签。
+     *
+     * 现在只接受三种**强相关**：
+     *   1. 完全相等；
+     *   2. 原文是某个合法标签的**真前缀**（如「辅助」→「辅助干员」、
+     *      「费用回」→「费用回复」）—— OCR 截断的典型形态；
+     *   3. 与某个合法标签等长且编辑距离 ≤1（错一个字）。
+     *
+     * 这样残片只能指向「它明显是哪个标签」，不会扩散到无关词。
+     */
+    private static List<String> plausibleTags(String raw) {
+        List<String> res = new ArrayList<>();
+        if (raw == null) return res;
+        String t = raw.replaceAll("[\\s\\u00A0]", "")
+                .replace("（", "").replace("）", "")
+                .replace("(", "").replace(")", "");
+        if (t.length() < 2) return res;
+
+        final String tt = t;
+        List<String> pool = new ArrayList<>();
+        for (String v : VALID) {
+            if (tt.equals(v)) { pool.add(v); continue; }
+            // 真前缀：OCR 截断了尾部
+            if (v.length() > tt.length() && v.startsWith(tt)) { pool.add(v); continue; }
+            // 等长且只错一个字
+            if (v.length() == tt.length() && editDistance(tt, v) <= 1) { pool.add(v); }
+        }
+        // 按「候选长度升序」（越短越保守）+ 字典序，保证结果确定
+        Collections.sort(pool, new Comparator<String>() {
+            public int compare(String a, String b) {
+                if (a.length() != b.length()) return a.length() - b.length();
+                return a.compareTo(b);
+            }
+        });
+        return pool;
+    }
+
+    /**
+     * 全局分配：把「每按钮的候选列表」摊成「尽量互不相同」的标签集合。
+     *
+     * ★ v2.9.6 新增，解决真机反馈的误报 ★
+     *
+     * 核心洞察：**公招同一次出现的 5 个标签一定互不相同**。这个约束原来完全
+     * 没利用，反而被 `!tags.contains(tag)` 拿去当去重规则用 —— 结果是「撞车就
+     * 丢掉后一个」，造成只有 4 个标签、弹出「识别不准确」。
+     *
+     * 做法是轮转匹配：每轮让还没着落的按钮去取「自己候选里第一个未被占用」的；
+     * 某一轮全员都没有新进展就停。
+     *
+     * ★ 铁律：绝不为了凑满 5 个而编造 ★
+     *
+     * 第一版实现有个严重错误：候选全被占的按钮，直接拿 cands[i][0]（哪怕撞车）
+     * 硬塞进结果。实测场景「辅助干员残片撞上真辅助标签」时，它把「位移」造了
+     * 出来 —— 结果 5 个标签看起来正常、uncertain=false，但有一个是假的，
+     * 用户会照着去选一个根本不保底的组合。这比"少认一个、提示不可靠"糟糕得多。
+     *
+     * 所以这里宁可返回 4 个（调用方会置 uncertain），也不编第 5 个。
+     */
+    private static void assignTags(List<List<String>> cands, List<String> out) {
+        out.clear();
+        if (cands.isEmpty()) return;
+
+        int n = cands.size();
+        int[] ptr = new int[n];
+        boolean[] satisfied = new boolean[n];
+        Set<String> used = new LinkedHashSet<>();
+
+        for (int round = 0; round < VALID.length + 2; round++) {
+            boolean progress = false;
+            for (int i = 0; i < n; i++) {
+                if (satisfied[i]) continue;
+                List<String> c = cands.get(i);
+                while (ptr[i] < c.size() && used.contains(c.get(ptr[i]))) {
+                    ptr[i]++;
+                }
+                if (ptr[i] < c.size()) {
+                    used.add(c.get(ptr[i]));
+                    satisfied[i] = true;
+                    progress = true;
+                }
+            }
+            if (!progress) break;
+        }
+
+        // 不再有「兜底硬塞」这一步。没拿到的就是没识别出来，
+        // 由调用方置 uncertain 让用户知道结果偏保守。
+        out.addAll(used);
     }
 
     /**
