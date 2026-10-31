@@ -17,13 +17,20 @@
 - **口径区分保底与赌注**：清楚区分「时长保底」（标签全被划也至少拿到）
   与「标签命中」（有风险），不把上限当保底忽悠你
 - **可手动修正**：OCR 认错时面板里有输入框，改完点「重算」
-- **arm64 + armeabi-v7a**，不需要 Google 服务框架
+- **arm64（64 位 ARM）**，不需要 Google 服务框架，15.5 MB
 
 ## 安装
 
 ![扫码下载](design/qr-release.png)
 
-1. 手机扫码，或到 [Releases](https://github.com/TttMc/arknights-recruit-helper/releases/latest) 下载最新 APK
+1. 手机扫码，或直接打开下载地址：
+
+   **国内推荐**：<https://pub-f89e4319d7ba400db492a2608dc872ae.r2.dev/latest.apk>
+   （Cloudflare R2，实测约 275 KB/s）
+
+   **境外 / 看版本说明**：[Releases](https://github.com/TttMc/arknights-recruit-helper/releases/latest)
+   （GitHub，境内直连只有约 17 KB/s，15 MB 要下十几分钟，不建议）
+
 2. 手机允许「安装未知来源应用」后安装
 3. 打开 App，依次完成三步：
 
@@ -119,8 +126,9 @@ aapt dump permissions build/outputs/apk/release/*.apk
 
 结果应只有上面 4 条，外加系统自动生成的 `DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION`。
 
-因为这个约束，App 内**不会自动检查更新**——「获取最新版」按钮只是把发布页地址交给
-系统浏览器打开（真正发请求的是浏览器），App 自身一个字节都不联网。
+因为这个约束，App 内**不会自动检查更新**——「下载最新版」按钮只是把下载地址交给
+系统浏览器打开（真正发请求的是浏览器进程，本应用只递了个字符串），
+App 自身一个字节都不联网。
 
 ## 构建
 
@@ -173,6 +181,29 @@ build-and-serve.cmd --serve    # 只起服务，不重新编译
 
 只读服务，只暴露 `build/outputs/apk/release/*.apk`，不列目录、不接受上传。
 
+### 发布到公网
+
+两条腿：GitHub 存代码与版本归档，Cloudflare R2 供国内下载。
+
+```bash
+# 1. 传 APK 到 R2（会同时更新 latest.apk 和 update.json）
+R2_ACCOUNT_ID=... R2_ACCESS_KEY_ID=... R2_SECRET_ACCESS_KEY=... \
+R2_BUCKET=tmc-pj-01 R2_PUBLIC_BASE=https://pub-xxxx.r2.dev \
+node tools/publish-r2.mjs
+
+# 2. 重新生成二维码卡片
+python tools/make-qr.py --version v2.9.5
+```
+
+`publish-r2.mjs` 只依赖 Node 内置模块，自己实现了 AWS SigV4 签名，不需要装 AWS SDK。
+
+**为什么默认走 R2**：实测同一台机器、同一个包，
+GitHub 约 **17 KB/s**（15 MB 要下十几分钟还常断），R2 约 **275 KB/s**，快 16 倍。
+GitHub 仍然是源码和版本说明的正式入口，R2 只是下载镜像。
+
+> R2 免费额度：10 GB 存储 + 出网流量全免费，单对象最大 5 TB。
+> 代价是要在 Cloudflare 绑一个支付方式（Free 计划不扣钱）。
+
 ### 算法回归测试
 
 `Recruit` 不依赖任何 Android 类，可以脱 SDK 单独编译测试：
@@ -200,6 +231,9 @@ build-and-serve.cmd --serve    # 只起服务，不重新编译
 - **横屏帧方向未在所有机型验证**：`InputImage` 的 rotation 恒传 0。
   若某机型交上来的帧本身转了 90°，会表现为「没识别到标签」
 - **干员数据是静态快照**，新干员进池后需要手动更新（见上）
+- **只支持 arm64**：为了把体积从 22 MB 降到 15.5 MB，去掉了 32 位 ARM 的库。
+  2016 年前的 32 位设备装不上；要兼顾的话在 `build.gradle` 里加回
+  `abiFilters 'arm64-v8a', 'armeabi-v7a'`
 
 ## 免责声明
 

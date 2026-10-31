@@ -38,8 +38,22 @@ android {
         // ★ 发新版时把这两个数字一起往上加 ★
         // versionCode 必须是整数且单调递增（升级判断只看它）；
         // versionName 只是给人看的。
-        versionCode 21
-        versionName "2.9.3"
+        versionCode 22
+        versionName "2.9.4"
+
+        // ★ v2.9.4：只发 arm64 ★
+        // 之前 APK 里同时打了两套 ML Kit 原生库：
+        //   lib/arm64-v8a    10.55 MB
+        //   lib/armeabi-v7a   6.47 MB
+        // 拆掉 32 位后 22.0 MB → 约 15.4 MB（省 29%）。
+        // 现在支持 32 位 ARM 的安卓机基本只剩 2016 年前的老设备，
+        // 而公招助手用到的 ML Kit 也是 arm64 优先，没必要为极少数设备让所有人多下 6.5MB。
+        // 真要兼顾老机器，把下面的 abiFilters 换成
+        //   abiFilters 'arm64-v8a', 'armeabi-v7a'
+        // 或者改用 splits { abi { ... } } 出多个包。
+        ndk {
+            abiFilters 'arm64-v8a'
+        }
     }
 
     compileOptions {

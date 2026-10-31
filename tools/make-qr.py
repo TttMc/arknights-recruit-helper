@@ -31,7 +31,9 @@ TEXT3 = (0x5F, 0x6B, 0x72)
 AMBER = (0xFF, 0xB0, 0x20)
 INK = (0x10, 0x14, 0x17)   # QR 模块色（近黑，非纯黑更柔和）
 
-DEFAULT_URL = "https://github.com/TttMc/arknights-recruit-helper/releases/latest"
+# 默认指向 Cloudflare R2 上的 latest.apk：
+# 实测国内直连 GitHub 约 17 KB/s（15MB 要下十几分钟），R2 约 275 KB/s，快 16 倍。
+DEFAULT_URL = "https://pub-f89e4319d7ba400db492a2608dc872ae.r2.dev/latest.apk"
 
 
 def find_font(size, bold=False):
@@ -68,17 +70,44 @@ def find_mono(size):
     return ImageFont.load_default()
 
 
-def make_qr(url, box_px=560):
+def make_qr(url, target_px=560, border=3):
+    """
+    生成二维码位图，**不做插值缩放**。
+
+    ★ 为什么不能用 resize ★
+    最初写成 box_size=10 生成再 LANCZOS 缩放到 560px，结果肉眼看着没问题，
+    但 pyzbar / 多数手机扫码器都解不出来：非整数倍缩放会把模块边缘插值成
+    灰色细带，二值化之后模块宽度不再是整齐的整数像素，采样点落在边界上就废了。
+
+    正确做法是先 make(fit=True) 拿到模块数，再反算一个整数 box_size，
+    让每个模块恰好占 N×N 个像素。这样输出尺寸略有浮动（可能 520 或 574），
+    但一定能扫。尺寸浮动用居中粘贴吸收掉。
+    """
     qr = qrcode.QRCode(
         version=None,
         error_correction=ERROR_CORRECT_M,
         box_size=10,
-        border=2,
+        border=border,
     )
     qr.add_data(url)
     qr.make(fit=True)
-    img = qr.make_image(fill_color=INK, back_color=(255, 255, 255)).convert("RGB")
-    return img.resize((box_px, box_px), Image.LANCZOS)
+    modules = qr.modules_count  # 不含 border 的有效模块数
+
+    # 反算整数 box_size：总边长 = (modules + 2*border) * box
+    # 注意 box_size 必须在构造 QRCode 时就定好 —— qrcode 的 make_image()
+    # 不接受 box_size 参数（会撞 BaseImage.__init__ 的重复实参）。
+    total_units = modules + border * 2
+    box = max(1, round(target_px / total_units))
+
+    qr2 = qrcode.QRCode(
+        version=qr.version,
+        error_correction=ERROR_CORRECT_M,
+        box_size=box,
+        border=border,
+    )
+    qr2.add_data(url)
+    qr2.make(fit=False)
+    return qr2.make_image(fill_color=INK, back_color=(255, 255, 255)).convert("RGB")
 
 
 def rounded_card(size, radius, fill, outline=None, width=1):
@@ -133,10 +162,12 @@ def build(url, out_path, version="v2.9.3"):
     y += 60
 
     # ---- 二维码（白底深模块，扫码最稳）----
-    qr_size = 560
-    qr = make_qr(url, qr_size)
+    # 注意：qr 的实际边长由整数 box_size 决定，会在 560 附近浮动几十像素，
+    # 所以白卡尺寸按 qr 实测尺寸反推，而不是用写死的 qr_size。
+    qr = make_qr(url, 560)
+    qw, qh = qr.size
     pad = 26
-    box_size = (qr_size + pad * 2, qr_size + pad * 2)
+    box_size = (qw + pad * 2, qh + pad * 2)
     qr_card, qr_mask = rounded_card(box_size, 24, (255, 255, 255))
     qx = cx - box_size[0] // 2
     canvas.paste(qr_card, (qx, y), qr_mask)
@@ -155,12 +186,10 @@ def build(url, out_path, version="v2.9.3"):
     y += bh + 44
 
     # ---- 直链（等宽，可手动抄）----
-    f_mono = find_mono(22)
-    d.text((cx - d.textlength("releases/latest", font=f_mono) / 2, y),
-           "releases/latest", font=f_mono, fill=TEXT3)
-    y += 40
-    host = "github.com/TttMc/arknights-recruit-helper"
-    d.text((cx - d.textlength(host, font=f_mono) / 2, y), host, font=f_mono, fill=TEXT3)
+    f_mono = find_mono(20)
+    for line in short_url_lines(url):
+        d.text((cx - d.textlength(line, font=f_mono) / 2, y), line, font=f_mono, fill=TEXT3)
+        y += 34
 
     # ---- 底部提示 ----
     # 位置由卡片底边反推，避免像原来那样贴着边框（看起来像被切掉）
@@ -172,6 +201,18 @@ def build(url, out_path, version="v2.9.3"):
 
     canvas.save(out_path, "PNG", optimize=True)
     return out_path
+
+
+def short_url_lines(url):
+    """把 URL 拆成适合在卡片上排版的 1~2 行（去掉协议头）。"""
+    s = url.replace("https://", "").replace("http://", "")
+    if len(s) <= 34:
+        return [s]
+    # 在第一个 / 之后断开
+    i = s.find("/")
+    if 0 < i < len(s) - 1:
+        return [s[: i + 1], s[i + 1 :]]
+    return [s[: len(s) // 2], s[len(s) // 2 :]]
 
 
 def main():

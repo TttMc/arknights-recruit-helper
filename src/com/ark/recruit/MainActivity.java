@@ -32,13 +32,19 @@ public class MainActivity extends Activity {
     static final String KEY_RC = "proj_result_code";
 
     /**
-     * 发布页地址（永远指向最新一份 Release）。
+     * 默认下载地址：Cloudflare R2（国内下得动）。
      *
-     * ★ 改仓库名时只改这一行 ★
-     * /releases/latest 是 GitHub 的固定重定向，新版本传上去后这个地址不变，
-     * 所以不需要每次发版都改代码。用户在浏览器里还能顺手存成书签。
+     * ★ 发新版后不用改这里 ★ —— R2 上固定有一个 latest.apk，每次发布覆盖它。
+     *
+     * 为什么默认不用 GitHub：实测国内直连 github.com 只有约 17 KB/s
+     * （15MB 要下 15 分钟以上，还经常断），而同一个包从 R2 拉是约 286 KB/s，
+     * 快 17 倍。GitHub 发布页仍然保留，作为境外用户和归档入口。
      */
-    private static final String RELEASE_LATEST_URL =
+    private static final String DOWNLOAD_URL =
+            "https://pub-f89e4319d7ba400db492a2608dc872ae.r2.dev/latest.apk";
+
+    /** 备用入口：GitHub 发布页（境外快、且能看到版本说明与源码） */
+    private static final String RELEASE_PAGE_URL =
             "https://github.com/TttMc/arknights-recruit-helper/releases/latest";
 
     private int lastResultCode = 0;
@@ -223,20 +229,20 @@ public class MainActivity extends Activity {
         card.addView(headRow);
 
         TextView tip = Ui.tv(this,
-                "本机版本如上。下方按钮用浏览器打开 GitHub 发布页，"
-                + "App 自身不联网。", 10.5f, Ui.TEXT3);
+                "本机版本如上。点下方按钮用浏览器打开下载地址，App 自身不联网。",
+                10.5f, Ui.TEXT3);
         tip.setPadding(0, Ui.dp(this, 6), 0, Ui.dp(this, 10));
         card.addView(tip);
 
         LinearLayout btnRow = Ui.row(this);
 
-        TextView open = Ui.tv(this, "获取最新版", 13f, Ui.VOID);
+        TextView open = Ui.tv(this, "下载最新版", 13f, Ui.VOID);
         open.setTypeface(Ui.med());
         open.setGravity(Gravity.CENTER);
         open.setBackground(Ui.round(Ui.AMBER, 0, 0, Ui.dp(this, 6)));
         open.setPadding(0, Ui.dp(this, 11), 0, Ui.dp(this, 11));
         open.setOnClickListener(new View.OnClickListener() {
-            public void onClick(View v) { openReleasePage(); }
+            public void onClick(View v) { openUrl(DOWNLOAD_URL); }
         });
         btnRow.addView(open, new LinearLayout.LayoutParams(0,
                 LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
@@ -251,43 +257,57 @@ public class MainActivity extends Activity {
                 LinearLayout.LayoutParams.WRAP_CONTENT);
         cpLp.leftMargin = Ui.dp(this, 8);
         copy.setLayoutParams(cpLp);
-        // 复制按钮是给「打不开 GitHub」准备的退路：地址拿去别处用
+        // 复制按钮是给「打不开浏览器」准备的退路：地址拿去电脑或别处下载
         copy.setOnClickListener(new View.OnClickListener() {
-            public void onClick(View v) { copyReleaseUrl(); }
+            public void onClick(View v) { copyUrl(DOWNLOAD_URL); }
         });
         btnRow.addView(copy);
 
         card.addView(btnRow);
 
-        TextView url = Ui.tv(this, RELEASE_LATEST_URL, 9.5f, Ui.TEXT3);
+        TextView url = Ui.tv(this, DOWNLOAD_URL, 9.5f, Ui.TEXT3);
         url.setPadding(0, Ui.dp(this, 8), 0, 0);
         card.addView(url);
+
+        // 备用入口：GitHub 发布页。放成一行小字链接而不是第二个按钮，
+        // 免得主次不分 —— 默认路径是 R2。
+        TextView alt = Ui.tv(this, "GitHub 发布页（版本说明 / 源码）›", 10.5f, Ui.TEXT2);
+        alt.setPadding(0, Ui.dp(this, 8), 0, 0);
+        alt.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) { openUrl(RELEASE_PAGE_URL); }
+        });
+        card.addView(alt);
 
         return card;
     }
 
-    /** 用浏览器打开发布页。ActivityNotFoundException 必须处理：精简 ROM 可能没有浏览器 */
-    private void openReleasePage() {
+    /**
+     * 用浏览器打开 URL。
+     *
+     * ★ 这里不需要 INTERNET 权限 ★ —— 发请求的是浏览器进程，本应用只递了个字符串。
+     * ActivityNotFoundException 必须处理：精简 ROM 可能没有浏览器，
+     * 此时退回复制地址，不能让人卡在点不动的按钮上。
+     */
+    private void openUrl(String url) {
         try {
-            Intent i = new Intent(Intent.ACTION_VIEW, Uri.parse(RELEASE_LATEST_URL));
+            Intent i = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
             i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
             startActivity(i);
         } catch (Throwable t) {
-            // 打不开就给退路，不要让人卡死在这个按钮上
-            copyReleaseUrl();
+            copyUrl(url);
             toast("没有可用浏览器，地址已复制");
         }
     }
 
-    private void copyReleaseUrl() {
+    private void copyUrl(String url) {
         try {
             android.content.ClipboardManager cm = (android.content.ClipboardManager)
                     getSystemService(CLIPBOARD_SERVICE);
             cm.setPrimaryClip(android.content.ClipData
-                    .newPlainText("公招助手发布页", RELEASE_LATEST_URL));
+                    .newPlainText("公招助手下载地址", url));
             toast("地址已复制，可用浏览器打开");
         } catch (Throwable t) {
-            toast("复制失败：" + RELEASE_LATEST_URL);
+            toast("复制失败：" + url);
         }
     }
 
