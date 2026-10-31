@@ -21,7 +21,9 @@
 
 ## 安装
 
-1. 到 [Releases](https://github.com/TttMc/arknights-recruit-helper/releases/latest) 下载最新 APK
+![扫码下载](design/qr-release.png)
+
+1. 手机扫码，或到 [Releases](https://github.com/TttMc/arknights-recruit-helper/releases/latest) 下载最新 APK
 2. 手机允许「安装未知来源应用」后安装
 3. 打开 App，依次完成三步：
 
