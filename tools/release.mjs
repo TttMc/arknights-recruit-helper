@@ -787,21 +787,38 @@ async function main() {
       info(`[dry-run] 将更新 latest.apk`);
       info(`[dry-run] 将更新 update.json`);
     } else {
-      await r2Put(versionedKey, apkBuf, apkType);
-      info(`已上传 ${versionedKey}`);
-      await r2Put('latest.apk', apkBuf, apkType);
-      info('已更新 latest.apk');
-      const update = {
-        versionName,
-        versionCode: Number(versionCode),
-        apk: 'latest.apk',
-        size: apkBuf.length,
-        sha256: apkSha,
-        publishedAt: new Date().toISOString(),
-        notes: `https://github.com/${REPO}/releases/latest`,
-      };
-      await r2Put('update.json', Buffer.from(JSON.stringify(update, null, 2)), 'application/json; charset=utf-8');
-      info('已更新 update.json');
+      // 幂等检查：update.json 里记着上一次发布的 sha256，
+      // 和本次一致就说明内容没变，三个文件都不必重传。
+      let sameAsPublished = false;
+      try {
+        const cur = await s3('GET', `/${process.env.R2_BUCKET}/update.json`);
+        if (cur.status === 200) {
+          const j = JSON.parse(cur.text);
+          sameAsPublished = j.sha256 === apkSha && j.versionName === versionName;
+        }
+      } catch {
+        /* 首次发布或解析失败，按需上传处理 */
+      }
+
+      if (sameAsPublished) {
+        info(`R2 上已是 v${versionName} 且内容一致，跳过上传`);
+      } else {
+        await r2Put(versionedKey, apkBuf, apkType);
+        info(`已上传 ${versionedKey}`);
+        await r2Put('latest.apk', apkBuf, apkType);
+        info('已更新 latest.apk');
+        const update = {
+          versionName,
+          versionCode: Number(versionCode),
+          apk: 'latest.apk',
+          size: apkBuf.length,
+          sha256: apkSha,
+          publishedAt: new Date().toISOString(),
+          notes: `https://github.com/${REPO}/releases/latest`,
+        };
+        await r2Put('update.json', Buffer.from(JSON.stringify(update, null, 2)), 'application/json; charset=utf-8');
+        info('已更新 update.json');
+      }
     }
 
     step(`裁剪 R2（保留最近 ${KEEP} 个）`);
