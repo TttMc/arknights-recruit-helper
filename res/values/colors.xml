@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- ===== 底板 ===== -->
+    <color name="ak_void">#0A0D0F</color>
+    <color name="ak_panel">#14181B</color>
+    <color name="ak_panel2">#1A1F23</color>
+    <color name="ak_inset">#0E1214</color>
+    <color name="ak_line">#262E34</color>
+    <color name="ak_line2">#333D45</color>
+    <color name="ak_line_hi">#46525B</color>
+
+    <!-- ===== 文字 ===== -->
+    <color name="ak_text">#E8EDF0</color>
+    <color name="ak_text2">#9AA7AE</color>
+    <color name="ak_text3">#5F6B72</color>
+    <color name="ak_text_dim">#3E474D</color>
+
+    <!-- ===== 行动色 ===== -->
+    <color name="ak_amber">#FFB020</color>
+    <color name="ak_amber_hi">#FFC857</color>
+    <color name="ak_amber_lo">#B87811</color>
+    <color name="ak_teal">#2FD2C4</color>
+    <color name="ak_green">#34D399</color>
+    <color name="ak_red">#FF5A5A</color>
+
+    <!-- ===== 星级色 ===== -->
+    <color name="star1">#7C878E</color>
+    <color name="star2">#5FD08A</color>
+    <color name="star3">#4E9BFF</color>
+    <color name="star4">#B36BFF</color>
+    <color name="star5">#FFE066</color>
+    <color name="star6">#FF7A3C</color>
+
+    <!-- 辅助 -->
+    <color name="ak_chip_bg">#22282D</color>
+    <color name="ak_overlay">#9E000000</color>
+    <color name="ak_row_press">#1F262B</color>
+</resources>

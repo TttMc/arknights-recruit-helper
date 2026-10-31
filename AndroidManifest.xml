@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <!-- 悬浮窗 -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <!-- 前台服务（截屏必须，Android 10+ 要求 mediaProjection 类型） -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!--
+      ★ v2.9.2：显式移除互联网权限 ★
+
+      ML Kit 的传递依赖 com.google.android.datatransport:transport-backend-cct:2.3.3
+      会往合并后的 manifest 里塞 INTERNET 和 ACCESS_NETWORK_STATE
+      （aapt dump permissions 实测可见）。本应用截屏与识别全在内存、不上传任何数据，
+      带着这两条权限会给用户和第三方权限检查工具完全错误的信号。
+
+      中文识别模型随 APK 打包（bundled），识别全程不走网络，
+      因此移除不影响功能。日后若真要联网，删掉下面两行即可。
+    -->
+    <uses-permission android:name="android.permission.INTERNET" tools:node="remove" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" tools:node="remove" />
+
+    <application
+        android:label="公招助手"
+        android:icon="@mipmap/ic_launcher"
+        android:allowBackup="true"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.ArkRecruit">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:launchMode="singleTask">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <service
+            android:name=".OverlayService"
+            android:exported="false"
+            android:foregroundServiceType="mediaProjection" />
+
+    </application>
+</manifest>

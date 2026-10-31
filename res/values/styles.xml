@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.ArkRecruit" parent="@android:style/Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/ak_void</item>
+        <item name="android:statusBarColor">@color/ak_void</item>
+        <item name="android:navigationBarColor">@color/ak_void</item>
+        <item name="android:colorAccent">@color/ak_amber</item>
+        <item name="android:textColorPrimary">@color/ak_text</item>
+        <item name="android:textColorSecondary">@color/ak_text2</item>
+    </style>
+</resources>

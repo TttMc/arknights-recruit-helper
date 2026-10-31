@@ -1,4 +1,4 @@
-# ---- 绛惧悕涓庡嚟鎹細缁濆涓嶈鎻愪氦 ----
+# ---- 签名与凭据：绝对不要提交 ----
 keystore.properties
 *.keystore
 *.jks
@@ -6,7 +6,7 @@ keystore.properties
 .env
 .env.*
 
-# ---- 鏋勫缓浜х墿涓庣紦瀛?----
+# ---- 构建产物与缓存 ----
 build/
 .gradle/
 local.properties
@@ -18,18 +18,18 @@ captures/
 .externalNativeBuild/
 .cxx/
 
-# ---- Python锛坱ools/diagnose.py 鐨勫瓧鑺傜爜缂撳瓨锛?---
+# ---- Python（tools/diagnose.py 的字节码缓存）----
 __pycache__/
 *.py[cod]
 
-# ---- 璋冭瘯鐢ㄧ殑鐪熷疄娓告垙鎴浘锛堝惈鐜╁淇℃伅锛屽埆鍏紑锛?---
+# ---- 调试用的真实游戏截图（含玩家信息，别公开）----
 _probe/
 
-# ---- IDE / 绯荤粺 ----
+# ---- IDE / 系统 ----
 .idea/
 *.iml
 .DS_Store
 Thumbs.db
 
-# ---- 本机推送辅助（含 token 用法，不入库）----
+# ---- �������͸������� token �÷�������⣩----
 .dsh-push/

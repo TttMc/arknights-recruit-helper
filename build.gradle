@@ -1,0 +1,98 @@
+plugins {
+    id 'com.android.application' version '8.4.0'
+}
+
+// ---------------------------------------------------------------- 签名配置
+// ★ v2.9.2 ★ 口令不再硬编码在本文件里。
+// 优先级：环境变量 > keystore.properties（已在 .gitignore）> 无（退回 debug 签名）。
+// 之前的写法把 storePassword 明文写死在构建脚本里，任何拿到源码的人都能
+// 签出同签名、可覆盖升级的假冒安装包。
+def keystoreProps = new Properties()
+def keystorePropsFile = rootProject.file('keystore.properties')
+if (keystorePropsFile.exists()) {
+    keystorePropsFile.withInputStream { keystoreProps.load(it) }
+}
+
+def signStoreFile = System.getenv('ARK_STORE_FILE') ?: keystoreProps.getProperty('storeFile')
+def signStorePass = System.getenv('ARK_STORE_PASSWORD') ?: keystoreProps.getProperty('storePassword')
+def signKeyAlias = System.getenv('ARK_KEY_ALIAS') ?: keystoreProps.getProperty('keyAlias')
+def signKeyPass = System.getenv('ARK_KEY_PASSWORD') ?: keystoreProps.getProperty('keyPassword')
+
+def hasSigning = signStoreFile != null && rootProject.file(signStoreFile).exists()
+        && signStorePass != null && signKeyAlias != null && signKeyPass != null
+
+android {
+    namespace 'com.ark.recruit'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId "com.ark.recruit"
+        // ★ v2.9.2：24 → 26 ★
+        // 启动图标只有 res/mipmap-anydpi-v26/ic_launcher.xml（自适应图标），
+        // 没有任何密度位图兜底。API 24/25 解析 @mipmap/ic_launcher 会抛
+        // Resources$NotFoundException —— 装上就崩。原 minSdk 24 是错的。
+        // 想支持 Android 7.x：补 res/mipmap-mdpi..xxxhdpi/ic_launcher.png
+        // 就能把这里改回 24。
+        minSdk 26
+        targetSdk 34
+        // ★ 发新版时把这两个数字一起往上加 ★
+        // versionCode 必须是整数且单调递增（升级判断只看它）；
+        // versionName 只是给人看的。
+        versionCode 21
+        versionName "2.9.3"
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    signingConfigs {
+        if (hasSigning) {
+            release {
+                storeFile rootProject.file(signStoreFile)
+                storePassword signStorePass
+                keyAlias signKeyAlias
+                keyPassword signKeyPass
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            signingConfig hasSigning ? signingConfigs.release : signingConfigs.debug
+        }
+        // debug 用系统默认 debug key，不再复用 release 签名
+    }
+
+    // 用自定义 sourceSets 指向现有目录结构，省得搬家
+    sourceSets {
+        main {
+            manifest.srcFile 'AndroidManifest.xml'
+            java.srcDirs = ['src']
+            res.srcDirs = ['res']
+        }
+    }
+
+    packagingOptions {
+        resources {
+            excludes += ['META-INF/DEPENDENCIES', 'META-INF/LICENSE*', 'META-INF/NOTICE*']
+        }
+        // 只保留 arm64 与 armeabi-v7a，去掉 x86 模拟器库（体积减半）
+        jniLibs {
+            useLegacyPackaging = false
+            excludes += ['**/x86/**', '**/x86_64/**']
+        }
+    }
+}
+
+dependencies {
+    // ML Kit 中文文字识别（离线，模型随 APK 打包，首次使用无需联网下载）
+    implementation 'com.google.mlkit:text-recognition-chinese:16.0.1'
+}
+
+if (!hasSigning) {
+    logger.warn('[ark-android] 未找到 keystore.properties 或环境变量 ARK_STORE_*，' +
+            'release 将使用 debug 签名（不能用于正式分发）。')
+}

@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 基础单位 4dp -->
+    <dimen name="ak_s1">4dp</dimen>
+    <dimen name="ak_s2">8dp</dimen>
+    <dimen name="ak_s3">12dp</dimen>
+    <dimen name="ak_s4">16dp</dimen>
+    <dimen name="ak_s5">20dp</dimen>
+    <dimen name="ak_s6">24dp</dimen>
+
+    <!-- 面板 -->
+    <dimen name="ak_panel_max_w">400dp</dimen>
+    <dimen name="ak_panel_pad">14dp</dimen>
+    <dimen name="ak_panel_radius">2dp</dimen>
+    <dimen name="ak_bevel">10dp</dimen>
+
+    <!-- 组件高度 -->
+    <dimen name="ak_ball">60dp</dimen>
+    <dimen name="ak_topbar">46dp</dimen>
+    <dimen name="ak_reco_h">56dp</dimen>
+    <dimen name="ak_toolbar">56dp</dimen>
+    <dimen name="ak_btn_h">40dp</dimen>
+    <dimen name="ak_input_h">42dp</dimen>
+    <dimen name="ak_touch">48dp</dimen>
+</resources>
