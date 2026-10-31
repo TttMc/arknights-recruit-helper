@@ -589,13 +589,28 @@ async function ensureRelease(versionName, versionCode, apkBuf, apkSha, dry) {
     die(`查询 Release 失败 ${rel.status}`);
   }
 
-  // 同名资产已存在则先删（幂等）
-  const existing = rel.json.assets?.find((a) => a.name === `ArknightsRecruit-v${versionName}.apk`);
+  // ★ 资产处理：只在「确实不同」时才替换 ★
+  //
+  // 原来是无条件「先删同名资产再上传」。后果很脏：如果本地 APK 和远端一致，
+  // 也会白删白传一次；更糟的是**一旦中途失败，Release 就变成 0 资产的空壳**
+  // （本次 v2.9.4 就这么被搞成 0 资产，后来还得从 R2 把包捞回来补）。
+  //
+  // 现在：同名资产存在且 digest 与本地 sha 相同 → 直接跳过。
+  const assetName = `ArknightsRecruit-v${versionName}.apk`;
+  const existing = rel.json.assets?.find((a) => a.name === assetName);
+  const sameContent =
+    existing && existing.digest && existing.digest.toLowerCase() === `sha256:${apkSha}`;
+
+  if (sameContent) {
+    info(`资产 ${assetName} 已存在且内容一致，跳过上传`);
+    return rel.json;
+  }
+
   if (existing) {
-    if (dry) info(`[dry-run] 将删除旧资产 ${existing.name}`);
+    if (dry) info(`[dry-run] 将替换资产 ${existing.name}（内容有变）`);
     else {
       await gh('DELETE', `/repos/${REPO}/releases/assets/${existing.id}`);
-      info(`已删除旧资产 ${existing.name}`);
+      info(`已删除旧资产 ${existing.name}（内容有变，需替换）`);
     }
   }
 
@@ -606,7 +621,7 @@ async function ensureRelease(versionName, versionCode, apkBuf, apkSha, dry) {
 
   // 上传（uploads.github.com，不走 api.github.com）
   const tok = readFileSync(TOKEN_FILE, 'utf8').trim();
-  const url = `https://uploads.github.com/repos/${REPO}/releases/${rel.json.id}/assets?name=ArknightsRecruit-v${versionName}.apk`;
+  const url = `https://uploads.github.com/repos/${REPO}/releases/${rel.json.id}/assets?name=${assetName}`;
   const up = await fetch(url, {
     method: 'POST',
     headers: {
