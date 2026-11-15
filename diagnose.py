@@ -134,8 +134,12 @@ def analyze(path):
             return (var ** 0.5) / avg < 0.12
 
         def drop_outliers(row):
+            # 与 Java 端对齐：TagFinder.pickTagGroup 在调用 dropOutliers 之后
+            # 一定会再按 left 排序一次才放入 good。这里若原样返回未排序的行，
+            # 后续用 row[0]["x"] 做「列起点对齐」判断就会拿到行内最后一个元素，
+            # 误判成「不对齐」→ 只选中第一行。Java 没有这个问题。
             if len(row) <= 2:
-                return row
+                return sorted(row, key=lambda r: r["x"])
             s = sorted(row, key=lambda r: r["x"])
             gaps = [s[i]["x"] - s[i-1]["x"] for i in range(1, len(s))]
             if not gaps:
